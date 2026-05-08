@@ -1,1 +1,2 @@
-# digital-cip
+# Digital Content Infrastructure Platform
+
