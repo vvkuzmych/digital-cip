@@ -1,0 +1,93 @@
+{
+  "rabbit_version": "3.13.0",
+  "users": [
+    { "name": "guest", "password": "guest", "tags": "administrator" }
+  ],
+  "vhosts": [
+    { "name": "/" }
+  ],
+  "permissions": [
+    { "user": "guest", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
+  ],
+  "exchanges": [
+    { "name": "ingest",        "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "ingest.retry",  "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "ingest.dlx",    "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
+  ],
+  "queues": [
+    {
+      "name": "ingest.ocr", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "ingest.retry",
+        "x-dead-letter-routing-key": "ingest.ocr.retry"
+      }
+    },
+    {
+      "name": "ingest.ocr.retry", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 5000,
+        "x-dead-letter-exchange": "ingest",
+        "x-dead-letter-routing-key": "ingest.ocr"
+      }
+    },
+    {
+      "name": "ingest.ocr.dlq", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {}
+    },
+
+    {
+      "name": "ingest.chunk", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "ingest.retry",
+        "x-dead-letter-routing-key": "ingest.chunk.retry"
+      }
+    },
+    {
+      "name": "ingest.chunk.retry", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 5000,
+        "x-dead-letter-exchange": "ingest",
+        "x-dead-letter-routing-key": "ingest.chunk"
+      }
+    },
+    {
+      "name": "ingest.chunk.dlq", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {}
+    },
+
+    {
+      "name": "ingest.embed", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "ingest.retry",
+        "x-dead-letter-routing-key": "ingest.embed.retry"
+      }
+    },
+    {
+      "name": "ingest.embed.retry", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 5000,
+        "x-dead-letter-exchange": "ingest",
+        "x-dead-letter-routing-key": "ingest.embed"
+      }
+    },
+    {
+      "name": "ingest.embed.dlq", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    { "source": "ingest",       "vhost": "/", "destination": "ingest.ocr",         "destination_type": "queue", "routing_key": "ingest.ocr",         "arguments": {} },
+    { "source": "ingest.retry", "vhost": "/", "destination": "ingest.ocr.retry",   "destination_type": "queue", "routing_key": "ingest.ocr.retry",   "arguments": {} },
+    { "source": "ingest.dlx",   "vhost": "/", "destination": "ingest.ocr.dlq",     "destination_type": "queue", "routing_key": "ingest.ocr.dlq",     "arguments": {} },
+
+    { "source": "ingest",       "vhost": "/", "destination": "ingest.chunk",       "destination_type": "queue", "routing_key": "ingest.chunk",       "arguments": {} },
+    { "source": "ingest.retry", "vhost": "/", "destination": "ingest.chunk.retry", "destination_type": "queue", "routing_key": "ingest.chunk.retry", "arguments": {} },
+    { "source": "ingest.dlx",   "vhost": "/", "destination": "ingest.chunk.dlq",   "destination_type": "queue", "routing_key": "ingest.chunk.dlq",   "arguments": {} },
+
+    { "source": "ingest",       "vhost": "/", "destination": "ingest.embed",       "destination_type": "queue", "routing_key": "ingest.embed",       "arguments": {} },
+    { "source": "ingest.retry", "vhost": "/", "destination": "ingest.embed.retry", "destination_type": "queue", "routing_key": "ingest.embed.retry", "arguments": {} },
+    { "source": "ingest.dlx",   "vhost": "/", "destination": "ingest.embed.dlq",   "destination_type": "queue", "routing_key": "ingest.embed.dlq",   "arguments": {} }
+  ],
+  "policies": [],
+  "parameters": []
+}

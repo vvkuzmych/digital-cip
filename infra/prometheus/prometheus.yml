@@ -1,0 +1,37 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ['rabbitmq:15692']
+
+  - job_name: api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api:3000']
+        labels:
+          service: api
+
+  - job_name: ocr-worker
+    static_configs:
+      - targets: ['ocr-worker:9100']
+        labels:
+          service: ocr-worker
+
+  - job_name: chunker-worker
+    static_configs:
+      - targets: ['chunker-worker:9101']
+        labels:
+          service: chunker-worker
+
+  - job_name: embedder-worker
+    static_configs:
+      - targets: ['embedder-worker:9102']
+        labels:
+          service: embedder-worker

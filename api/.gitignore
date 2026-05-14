@@ -1,0 +1,10 @@
+/.bundle
+/log/*
+/tmp/*
+/storage/*
+/public/uploads
+.env
+.env.local
+/coverage
+/spec/examples.txt
+*.swp
