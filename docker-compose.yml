@@ -1,0 +1,239 @@
+name: digital-cip
+
+x-common-env: &common-env
+  RAILS_ENV: ${RAILS_ENV:-development}
+  POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+  POSTGRES_USER: ${POSTGRES_USER:-cip}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cip}
+  POSTGRES_DB: ${POSTGRES_DB:-cip_development}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio12345}
+  MINIO_BUCKET: ${MINIO_BUCKET:-documents}
+  MINIO_REGION: ${MINIO_REGION:-us-east-1}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+  EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
+  CHUNK_SIZE: ${CHUNK_SIZE:-800}
+  CHUNK_OVERLAP: ${CHUNK_OVERLAP:-120}
+  OCR_LANG: ${OCR_LANG:-eng}
+  OCR_DPI: ${OCR_DPI:-200}
+  MAX_RETRIES: ${MAX_RETRIES:-5}
+  RETRY_TTL_MS: ${RETRY_TTL_MS:-5000}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: cip-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cip}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cip}
+      POSTGRES_DB: ${POSTGRES_DB:-cip_development}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: cip-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: cip-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+      - '15692:15692'
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: cip-minio
+    restart: unless-stopped
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio12345}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio-bootstrap:
+    image: minio/mc:latest
+    container_name: cip-minio-bootstrap
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio12345}
+      MINIO_BUCKET: ${MINIO_BUCKET:-documents}
+    entrypoint: ['/bin/sh', '/bootstrap.sh']
+    volumes:
+      - ./infra/minio/bootstrap.sh:/bootstrap.sh:ro
+    restart: 'no'
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: cip-api
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      RAILS_LOG_TO_STDOUT: 'true'
+      RAILS_SERVE_STATIC_FILES: 'true'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - '${API_HTTP_PORT:-3040}:3000'
+    volumes:
+      - ./api:/app
+      - rails-bundle:/usr/local/bundle
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/healthz']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ocr-worker:
+    build:
+      context: ./workers/ocr
+      dockerfile: Dockerfile
+    container_name: cip-ocr-worker
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      WORKER_CONCURRENCY: '2'
+      METRICS_PORT: '9100'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - '9100:9100'
+
+  chunker-worker:
+    build:
+      context: ./workers/chunker
+      dockerfile: Dockerfile
+    container_name: cip-chunker-worker
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      WORKER_CONCURRENCY: '4'
+      METRICS_PORT: '9101'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - '9101:9101'
+
+  embedder-worker:
+    build:
+      context: ./workers/embedder
+      dockerfile: Dockerfile
+    container_name: cip-embedder-worker
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      WORKER_CONCURRENCY: '2'
+      METRICS_PORT: '9102'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - embedder-models:/models
+    ports:
+      - '9102:9102'
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cip-prometheus
+    restart: unless-stopped
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cip-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    ports:
+      - '${GRAFANA_HTTP_PORT:-3010}:3000'
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:
+  minio-data:
+  rails-bundle:
+  prometheus-data:
+  grafana-data:
+  embedder-models:

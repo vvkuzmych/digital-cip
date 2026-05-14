@@ -1,0 +1,8 @@
+pika==1.3.2
+psycopg[binary]==3.2.3
+sentence-transformers==3.2.1
+pgvector==0.3.6
+prometheus-client==0.21.0
+python-json-logger==2.0.7
+tenacity==9.0.0
+numpy==1.26.4
